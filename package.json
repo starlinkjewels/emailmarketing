@@ -2,11 +2,11 @@
   "name": "gmail-mailer",
   "version": "1.0.0",
   "description": "Node.js Gmail API mail sender using OAuth2",
-  "main": "mailer.js",
+  "main": "index.js",
   "type": "commonjs",
   "scripts": {
-    "start": "node mailer.js",
-    "dev": "nodemon mailer.js"
+    "start": "node index.js",
+    "dev": "nodemon index.js"
   },
   "dependencies": {
     "express": "^4.19.2",
