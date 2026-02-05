@@ -12,6 +12,7 @@ const PORT = 3000;
 const SCOPES = ["https://www.googleapis.com/auth/gmail.send"];
 const CREDENTIALS_PATH = path.join(__dirname, "credentials.json");
 const TOKEN_PATH = path.join(__dirname, "token.json");
+const DEFAULT_FROM = '"Starlink Jewels 💍" <marketing.starlinkjewels@gmail.com>';
 
 // ===== LOAD CREDENTIALS =====
 const credentials = JSON.parse(fs.readFileSync(CREDENTIALS_PATH));
@@ -40,47 +41,119 @@ app.get("/auth", (req, res) => {
 
 // ===== OAUTH CALLBACK =====
 app.get("/oauth2callback", async (req, res) => {
-  const { code } = req.query;
-  const { tokens } = await oAuth2Client.getToken(code);
+  try {
+    const { code } = req.query;
+    const { tokens } = await oAuth2Client.getToken(code);
 
-  oAuth2Client.setCredentials(tokens);
-  fs.writeFileSync(TOKEN_PATH, JSON.stringify(tokens));
+    oAuth2Client.setCredentials(tokens);
+    fs.writeFileSync(TOKEN_PATH, JSON.stringify(tokens, null, 2));
 
-  res.send("✅ Gmail connected. You can now send emails.");
+    res.send("✅ Gmail connected. You can now send emails.");
+  } catch (err) {
+    res.status(500).send("OAuth failed");
+  }
 });
 
-// ===== SEND MAIL API =====
+// ===== SEND MAIL API (HTML + FULLY DYNAMIC) =====
 app.post("/send-mail", async (req, res) => {
   try {
-    const { to, subject, text } = req.body;
+    const {
+      from,
+      to,
+      cc,
+      bcc,
+      subject,
+      html,
+      text
+    } = req.body;
 
-    const gmail = google.gmail({ version: "v1", auth: oAuth2Client });
+    // ===== VALIDATION =====
+    if (!to || !subject || !html) {
+      return res.status(400).json({
+        success: false,
+        error: "VALIDATION_ERROR",
+        message: "Required fields: to, subject, html"
+      });
+    }
 
-    const message = [
-      `To: ${to}`,
-      "Content-Type: text/plain; charset=utf-8",
-      "MIME-Version: 1.0",
+    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+
+    const normalizeEmails = (value) => {
+      if (!value) return null;
+      const list = Array.isArray(value)
+        ? value
+        : value.split(",").map(e => e.trim());
+
+      for (const email of list) {
+        const match = email.match(/<([^>]+)>/) || [null, email];
+        if (!emailRegex.test(match[1])) {
+          throw new Error(`Invalid email address: ${email}`);
+        }
+      }
+      return list.join(", ");
+    };
+
+    const toEmails = normalizeEmails(to);
+    const ccEmails = cc ? normalizeEmails(cc) : null;
+    const bccEmails = bcc ? normalizeEmails(bcc) : null;
+
+    // ===== BUILD MIME MESSAGE =====
+    const boundary = "boundary_" + Date.now();
+
+    let mimeParts = [
+      `From: ${from || DEFAULT_FROM}`,
+      `To: ${toEmails}`,
+      ccEmails ? `Cc: ${ccEmails}` : null,
+      bccEmails ? `Bcc: ${bccEmails}` : null,
       `Subject: ${subject}`,
+      "MIME-Version: 1.0",
+      `Content-Type: multipart/alternative; boundary=${boundary}`,
       "",
-      text,
-    ].join("\n");
+      `--${boundary}`,
+      "Content-Type: text/plain; charset=utf-8",
+      "",
+      text || "This email contains HTML content.",
+      "",
+      `--${boundary}`,
+      "Content-Type: text/html; charset=utf-8",
+      "",
+      html,
+      "",
+      `--${boundary}--`
+    ].filter(Boolean).join("\n");
 
-    const encodedMessage = Buffer.from(message)
+    const encodedMessage = Buffer.from(mimeParts)
       .toString("base64")
       .replace(/\+/g, "-")
       .replace(/\//g, "_")
       .replace(/=+$/, "");
 
-    await gmail.users.messages.send({
+    const gmail = google.gmail({ version: "v1", auth: oAuth2Client });
+
+    const result = await gmail.users.messages.send({
       userId: "me",
       requestBody: { raw: encodedMessage },
     });
 
-    res.json({ success: true, message: "📧 Email sent successfully" });
+    res.status(200).json({
+      success: true,
+      message: "📧 Email sent successfully",
+      messageId: result.data.id
+    });
+
   } catch (err) {
-    console.error(err);
-    res.status(500).json({ success: false, error: err.message });
+    console.error("SEND MAIL ERROR:", err);
+    res.status(500).json({
+      success: false,
+      error: "SEND_FAILED",
+      message: err.message
+    });
   }
+});
+
+// ===== HEALTH CHECK =====
+app.get("/health", (req, res) => {
+  res.json({ status: "OK", service: "Gmail API Mailer" });
 });
 
 app.listen(PORT, () =>
