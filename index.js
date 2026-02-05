@@ -2,9 +2,18 @@ const fs = require("fs");
 const path = require("path");
 const express = require("express");
 const { google } = require("googleapis");
+const cors = require('cors');
 const app = express();
 app.use(express.json());
 const PORT = 3000;
+
+
+app.use(cors({
+  origin: '*', // Allow all origins, or specify your frontend URL like 'http://localhost:3000'
+  methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
+  allowedHeaders: ['Content-Type', 'Authorization'],
+  credentials: true
+}));
 
 // ===== CONFIG =====
 const SCOPES = ["https://www.googleapis.com/auth/gmail.send"];
