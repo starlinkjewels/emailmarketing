@@ -1,0 +1,7 @@
+# Google OAuth secrets
+credentials.json
+token.json
+
+# Node
+node_modules
+.env
